@@ -11,6 +11,7 @@ import { getLazyTradingKeyUtils } from '@/bonsai/lib/lazyDynamicLibs';
 import { wrapOperationFailure, wrapOperationSuccess } from '@/bonsai/lib/operationResult';
 import { logBonsaiError, logBonsaiInfo } from '@/bonsai/logs';
 import { BonsaiCore } from '@/bonsai/ontology';
+import { ComplianceStatus } from '@/bonsai/types/summaryTypes';
 import type { EncodeObject } from '@cosmjs/proto-signing';
 import { IndexedTx } from '@cosmjs/stargate';
 import { Method } from '@cosmjs/tendermint-rpc';
@@ -21,6 +22,7 @@ import { formatUnits, parseUnits } from 'viem';
 
 import { AMOUNT_RESERVED_FOR_GAS_USDC, AMOUNT_USDC_BEFORE_REBALANCE } from '@/constants/account';
 import { AnalyticsEvents, DEFAULT_TRANSACTION_MEMO, TransactionMemo } from '@/constants/analytics';
+import { ComplianceStates } from '@/constants/compliance';
 import { DialogTypes } from '@/constants/dialogs';
 import { DEFAULT_LEVERAGE_PPM } from '@/constants/leverage';
 import { QUANTUM_MULTIPLIER } from '@/constants/numbers';
@@ -43,6 +45,7 @@ import { log } from '@/lib/telemetry';
 import { sleep } from '@/lib/timeUtils';
 
 import { useAccounts } from './useAccounts';
+import { useComplianceState } from './useComplianceState';
 import { useDydxClient } from './useDydxClient';
 import { useReferredBy } from './useReferredBy';
 import { useTokenConfigs } from './useTokenConfigs';
@@ -198,9 +201,13 @@ const useSubaccountContext = ({ localDydxWallet }: { localDydxWallet?: LocalWall
   const usdcCoinBalance = balances.usdcAmount;
 
   const [showDepositDialog, setShowDepositDialog] = useState(true);
+  const { complianceState, complianceStatus } = useComplianceState();
+  const canDeposit = complianceState === ComplianceStates.FULL_ACCESS;
+  // Unprompted flows also wait for the compliance screen to resolve (UNKNOWN while loading).
+  const canPromptDeposit = canDeposit && complianceStatus !== ComplianceStatus.UNKNOWN;
 
   useEffect(() => {
-    if (isKeplr && usdcCoinBalance) {
+    if (isKeplr && usdcCoinBalance && canPromptDeposit) {
       if (showDepositDialog) {
         const balanceAmount = parseFloat(usdcCoinBalance);
         const usdcBalance = balanceAmount - AMOUNT_RESERVED_FOR_GAS_USDC;
@@ -217,17 +224,20 @@ const useSubaccountContext = ({ localDydxWallet }: { localDydxWallet?: LocalWall
       }
       setShowDepositDialog(false);
     }
-  }, [isKeplr, usdcCoinBalance, showDepositDialog, dispatch]);
+  }, [isKeplr, usdcCoinBalance, showDepositDialog, dispatch, canPromptDeposit]);
 
   const deposit = useCallback(
     async (amount: number) => {
       if (!subaccountClient) {
         return undefined;
       }
+      if (!canDeposit) {
+        throw new Error('Deposits are not available for this account');
+      }
 
       return depositToSubaccount({ subaccountClient, amount });
     },
-    [subaccountClient, depositToSubaccount]
+    [subaccountClient, depositToSubaccount, canDeposit]
   );
 
   const depositCurrentBalance = useCallback(async () => {

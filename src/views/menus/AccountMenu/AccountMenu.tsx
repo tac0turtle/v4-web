@@ -6,6 +6,7 @@ import tw from 'twin.macro';
 
 import { AMOUNT_RESERVED_FOR_GAS_USDC, OnboardingState } from '@/constants/account';
 import { ButtonAction, ButtonShape, ButtonSize } from '@/constants/buttons';
+import { ComplianceStates } from '@/constants/compliance';
 import { DialogTypes } from '@/constants/dialogs';
 import { STRING_KEYS } from '@/constants/localization';
 import { isDev } from '@/constants/networks';
@@ -94,6 +95,7 @@ export const AccountMenu = () => {
 
   const showConfirmPendingDeposit =
     walletInfo?.name === WalletType.Keplr &&
+    complianceState === ComplianceStates.FULL_ACCESS &&
     usedBalanceBN.gt(AMOUNT_RESERVED_FOR_GAS_USDC) &&
     usedBalanceBN.minus(AMOUNT_RESERVED_FOR_GAS_USDC).toFixed(2) !== '0.00';
 

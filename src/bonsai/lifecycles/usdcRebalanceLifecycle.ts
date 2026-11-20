@@ -14,11 +14,14 @@ import { sleep } from '@/lib/timeUtils';
 
 import { createSemaphore, SupersededError } from '../lib/semaphore';
 import { logBonsaiError, logBonsaiInfo } from '../logs';
+import { BonsaiCore } from '../ontology';
 import { createValidatorStoreEffect } from '../rest/lib/indexerQueryStoreEffect';
 import {
+  selectTxAuthorizedAccount,
   selectTxAuthorizedCloseOnlyAccount,
   selectUserHasUsdcGasForTransaction,
 } from '../selectors/accountTransaction';
+import { ComplianceStatus } from '../types/summaryTypes';
 
 // Sleep time between rebalances to ensure that the subaccount has time to process the previous transaction
 const SLEEP_TIME = timeUnits.second * 10;
@@ -31,13 +34,31 @@ export function setUpUsdcRebalanceLifecycle(store: RootStore) {
   const balanceAndTransfersSelector = createAppSelector(
     [
       selectTxAuthorizedCloseOnlyAccount,
+      selectTxAuthorizedAccount,
+      BonsaiCore.compliance.data,
       selectUserHasUsdcGasForTransaction,
       selectShouldAccountRebalanceUsdc,
     ],
-    (txAuthorizedAccount, userHasUsdcGasForTransaction, rebalanceAction) => {
+    (
+      txAuthorizedAccount,
+      fullAccessAccount,
+      complianceData,
+      userHasUsdcGasForTransaction,
+      maybeRebalanceAction
+    ) => {
       if (!txAuthorizedAccount) {
         return undefined;
       }
+
+      // Close-only (and geo-restricted) accounts may only pull gas funds out of a subaccount;
+      // depositing into a subaccount requires full access, same as the manual deposit UI.
+      // UNKNOWN means the compliance screen is still loading or failed, so don't deposit yet.
+      const canDeposit =
+        fullAccessAccount != null && complianceData.status !== ComplianceStatus.UNKNOWN;
+      const rebalanceAction =
+        maybeRebalanceAction?.requiredAction === 'deposit' && !canDeposit
+          ? undefined
+          : maybeRebalanceAction;
 
       const { localDydxWallet, sourceAccount, parentSubaccountInfo } = txAuthorizedAccount;
 
@@ -61,7 +82,13 @@ export function setUpUsdcRebalanceLifecycle(store: RootStore) {
       }
 
       async function rebalanceWalletFunds() {
-        const { localDydxWallet, parentSubaccountInfo, sourceAccount, rebalanceAction } = data!;
+        // Re-read state: this may run after a previous rebalance, by which time the account's
+        // authorization or balances may have changed.
+        const current = balanceAndTransfersSelector(store.getState());
+        if (current == null || !current.userHasUsdcGasForTransaction) {
+          return;
+        }
+        const { localDydxWallet, parentSubaccountInfo, sourceAccount, rebalanceAction } = current;
 
         // context: Cosmos wallets do not support our lifecycle methods and are instead handled within useNotificationTypes
         if (rebalanceAction == null || sourceAccount.chain === WalletNetworkType.Cosmos) {
