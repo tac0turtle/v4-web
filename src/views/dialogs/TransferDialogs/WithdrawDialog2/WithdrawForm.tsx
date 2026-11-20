@@ -127,6 +127,12 @@ export const WithdrawForm = ({
 
   const isDebouncedAmountSame = debouncedAmount === amount;
 
+  // Error from the last submit attempt (e.g. restricted address); cleared when inputs change.
+  const [submitError, setSubmitError] = useState<string>();
+  useEffect(() => {
+    setSubmitError(undefined);
+  }, [amount, destinationAddress, destinationChain]);
+
   const withdrawDisabled =
     !selectedRoute ||
     destinationAddress === '' ||
@@ -174,9 +180,9 @@ export const WithdrawForm = ({
       </WithTooltip>
       {stringGetter({ key: STRING_KEYS.WITHDRAW })}
     </div>
-  ) : validationError ? (
+  ) : (validationError ?? submitError) ? (
     <div tw="row gap-0.5">
-      <WithTooltip tooltipString={validationError}>
+      <WithTooltip tooltipString={validationError ?? submitError}>
         <WarningIcon tw="text-color-error" />
       </WithTooltip>
       {stringGetter({ key: STRING_KEYS.WITHDRAW })}
@@ -269,7 +275,8 @@ export const WithdrawForm = ({
       })
     );
 
-    executeWithdraw();
+    const result = await executeWithdraw();
+    if (!result.success) setSubmitError(result.errorMessage);
   };
 
   return (

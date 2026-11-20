@@ -387,13 +387,22 @@ const useDydxClientContext = () => {
 
   const { updateSanctionedAddresses } = useRestrictions();
 
+  // Fails closed: throws unless every address gets an explicit screening result.
   const screenAddresses = async ({ addresses }: { addresses: string[] }) => {
-    const promises = addresses.map((address) => indexerClient?.utility.screen(address));
+    if (!indexerClient) throw new Error('Indexer client not initialized, cannot screen addresses');
 
-    const results = await Promise.all(promises);
+    const results = await Promise.all(
+      addresses.map((address) => indexerClient.utility.screen(address))
+    );
 
     const screenedAddresses = Object.fromEntries(
-      addresses.map((address, index) => [address, !!results[index]?.restricted])
+      addresses.map((address, index) => {
+        const restricted: unknown = results[index]?.restricted;
+        if (typeof restricted !== 'boolean') {
+          throw new Error('Address screening returned no result');
+        }
+        return [address, restricted];
+      })
     );
 
     updateSanctionedAddresses(screenedAddresses);

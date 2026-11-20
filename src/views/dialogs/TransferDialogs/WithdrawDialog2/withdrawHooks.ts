@@ -14,6 +14,7 @@ import { USDC_ASSET_ID } from '@/constants/tokens';
 
 import { useSkipClient } from '@/hooks/transfers/skipClient';
 import { useAccounts } from '@/hooks/useAccounts';
+import { useDydxClient } from '@/hooks/useDydxClient';
 import { useLocaleSeparators } from '@/hooks/useLocaleSeparators';
 import { useStringGetter } from '@/hooks/useStringGetter';
 import { useWithdrawalInfo } from '@/hooks/useWithdrawalInfo';
@@ -52,6 +53,7 @@ export function useWithdrawStep({
   const stringGetter = useStringGetter();
   const dispatch = useAppDispatch();
   const { skipClient } = useSkipClient();
+  const { screenAddresses } = useDydxClient();
   const {
     dydxAddress,
     localDydxWallet,
@@ -122,6 +124,27 @@ export function useWithdrawStep({
       if (!userAddresses) throw new Error('No user addresses found');
       if (!localDydxWallet || !localInjectiveWallet || !dydxAddress) {
         throw new Error('No local wallets found');
+      }
+
+      // Compliance-screen both ends before signing, matching TransferForm.
+      const screenResults = await screenAddresses({
+        addresses: [dydxAddress, destinationAddress],
+      });
+      if (screenResults[dydxAddress]) {
+        return {
+          success: false,
+          errorMessage: stringGetter({
+            key: STRING_KEYS.WALLET_RESTRICTED_WITHDRAWAL_TRANSFER_ORIGINATION_ERROR_MESSAGE,
+          }),
+        };
+      }
+      if (screenResults[destinationAddress]) {
+        return {
+          success: false,
+          errorMessage: stringGetter({
+            key: STRING_KEYS.WALLET_RESTRICTED_WITHDRAWAL_TRANSFER_DESTINATION_ERROR_MESSAGE,
+          }),
+        };
       }
 
       const withdrawId = `withdraw-${crypto.randomUUID()}`;
